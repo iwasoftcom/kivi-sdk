@@ -102,7 +102,13 @@ jobs:
         id: crates
         uses: rust-lang/crates-io-auth-action@v1
 
-      - name: Publish to crates.io
-        run: cargo publish --manifest-path clients/rust/kivi/Cargo.toml
+      - name: Publish to crates.io (skip if version already on registry)
+        run: |
+          V=$(grep -m1 '^version' clients/rust/kivi/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          if curl -sf "https://crates.io/api/v1/crates/kivi-sdk/$V" >/dev/null 2>&1; then
+            echo "kivi-sdk $V already on crates.io — skipping."
+          else
+            cargo publish --manifest-path clients/rust/kivi/Cargo.toml
+          fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates.outputs.token }}
