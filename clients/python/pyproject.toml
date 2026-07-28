@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kivi-sdk"
+version = "1.1.0"
+description = "The untrusting client SDK for the kivi event-ledger database"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "iwasoft" }]
+keywords = ["kivi", "ledger", "event-sourcing", "grpc", "audit"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Intended Audience :: Developers",
+]
+dependencies = [
+    "grpcio>=1.60",
+    "protobuf>=4.25",
+]
+
+[project.urls]
+Homepage = "https://iwasoft.com"
+Repository = "https://github.com/iwasoftcom/kivi"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kivi"]
+
+[tool.hatch.build.targets.sdist]
+include = ["kivi", "README.md", "LICENSE"]

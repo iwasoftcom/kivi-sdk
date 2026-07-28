@@ -1,0 +1,51 @@
+# Kivi SDK publishing — for the PUBLIC GitHub repo `iwasoft/kivi-sdk`.
+#
+# Place this file at `.github/workflows/build.yml` in that repo. The filename,
+# the repo owner/name, and `environment: production` below MUST match the NuGet
+# Trusted Publishing policy exactly, or the OIDC exchange is rejected.
+#
+# The repo must contain the SDK sources it builds — for NuGet that means
+# `clients/dotnet/Kivi.Client/` and `api/kivi.proto` (the .csproj references
+# ../../../api/kivi.proto), in the same layout as the kivi repo. Push only the
+# open (MIT) SDKs + the proto to this repo; never the proprietary server/core.
+name: build
+
+on:
+  workflow_dispatch: {}          # manual: Actions tab → build → Run workflow
+  release:
+    types: [published]           # or: cutting a GitHub release publishes
+
+permissions:
+  contents: read
+  id-token: write                # REQUIRED for NuGet Trusted Publishing (OIDC)
+
+jobs:
+  nuget:
+    runs-on: ubuntu-latest
+    environment: production        # MUST match the Trusted Publishing policy
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'  # Kivi.Client targets net10.0
+
+      - name: Pack
+        run: dotnet pack clients/dotnet/Kivi.Client/Kivi.Client.csproj -c Release -o out
+
+      # Trusted Publishing: exchange the workflow's OIDC token for a short-lived
+      # NuGet API key — no stored secret. Verify the action name/inputs against
+      # nuget.org's "Trusted Publishing" docs (the "Learn more" link), as the
+      # action is new and its interface may differ.
+      - name: NuGet login (OIDC)
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: iwasoft            # your nuget.org account/username
+
+      - name: Push to NuGet
+        run: >
+          dotnet nuget push "out/*.nupkg"
+          --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

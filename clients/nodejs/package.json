@@ -1,0 +1,27 @@
+{
+  "name": "@iwasoft/kivi",
+  "version": "1.1.0",
+  "description": "The untrusting client SDK for the kivi event-ledger database",
+  "license": "MIT",
+  "author": "iwasoft",
+  "homepage": "https://iwasoft.com",
+  "repository": { "type": "git", "url": "https://github.com/iwasoftcom/kivi.git" },
+  "keywords": ["kivi", "ledger", "event-sourcing", "grpc", "audit"],
+  "type": "commonjs",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "files": ["dist/src", "kivi.proto", "LICENSE", "README.md"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "conformance": "node dist/conformance/runner.js"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}

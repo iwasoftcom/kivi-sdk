@@ -1,0 +1,12 @@
+[package]
+name = "conformance-runner"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+kivi = { path = "../kivi", package = "kivi-sdk" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio-stream = "0.1"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }

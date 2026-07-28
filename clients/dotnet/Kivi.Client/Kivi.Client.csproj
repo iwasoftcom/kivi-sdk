@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- kivi .NET SDK (PLAN3 G3.4): async-first (Task — the .NET idiom) with a
+       sync facade. Codegen at build time from the single contract
+       ../../../api/kivi.proto. Runtime deps: gRPC + protobuf only; the K3
+       verifier (byte-splicing + pure-C# Ed25519 verify) is self-contained. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Kivi</RootNamespace>
+
+    <!-- NuGet package metadata -->
+    <IsPackable>true</IsPackable>
+    <PackageId>Iwasoft.Kivi</PackageId>
+    <Version>1.1.0</Version>
+    <Authors>iwasoft</Authors>
+    <Company>iwasoft</Company>
+    <Description>The untrusting client SDK for the kivi event-ledger database.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://iwasoft.com</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/iwasoftcom/kivi</RepositoryUrl>
+    <PackageTags>kivi;ledger;event-sourcing;grpc;audit</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.30.1" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.70.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.70.0" PrivateAssets="All" />
+  </ItemGroup>
+  <ItemGroup>
+    <Protobuf Include="../../../api/kivi.proto" GrpcServices="Client" />
+  </ItemGroup>
+</Project>

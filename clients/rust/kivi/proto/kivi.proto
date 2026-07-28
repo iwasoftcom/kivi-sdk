@@ -1,0 +1,306 @@
+// kivi gRPC contract, v1 — THE single source of truth for the data plane
+// (PLAN2 F3). Freezing rule: a published field number is never changed or
+// reused; additions only.
+//
+// Bodies, records and view states travel as CANONICAL JSON STRINGS, not as
+// protobuf structs: format v1 is JSON-native and google.protobuf.Struct would
+// lose int64 fidelity (its numbers are doubles). The JSON string preserves the
+// exact bytes the ledger reasons about.
+//
+// Honesty note: proto3 cannot mark fields required — the "no answer without a
+// trace" guarantee (trace/scope always present) is enforced by the server test
+// suite instead.
+syntax = "proto3";
+
+package kivi.v1;
+
+option go_package = "kivi/api";
+
+service Kivi {
+  rpc Append(AppendRequest) returns (Receipt);
+  rpc AppendBatch(stream AppendRequest) returns (ReceiptList); // client-streaming bulk load
+  rpc AppendPrivate(AppendRequest) returns (Receipt);          // encrypted body (crypto-erase later)
+  rpc Erase(EraseRequest) returns (Receipt);                   // destroy the key, file the erasure
+  rpc GetRecord(GetRecordRequest) returns (RecordReply);
+  rpc Replay(ReplayRequest) returns (stream RecordReply);      // server-streaming
+  rpc Verify(Empty) returns (VerifyReport);
+  rpc QueryTable(TableRequest) returns (TracedAnswer);
+
+  // QuerySubject (G15): TableRequest's whole-row sibling. QueryTable answers
+  // one (subject, attribute) cell; a caller that doesn't already know which
+  // attributes exist for a subject had no way to ask "what do we know about
+  // X?" without paging the whole table (QueryViewPage) hunting for one key.
+  // Same traced contract, same view (Table) and cache tiers underneath —
+  // this is a new EXTRACTION over an index that already existed, not a new
+  // index: the value_json is the whole row {attribute: value, ...} and the
+  // trace is the union of every event that established any cell in it.
+  rpc QuerySubject(SubjectRequest) returns (TracedAnswer);
+  rpc QueryGraph(Empty) returns (ViewState);
+  rpc QuerySeries(SeriesRequest) returns (ViewState);
+  rpc Why(WhyRequest) returns (RecordList);                    // the receipts themselves
+  rpc Audit(AuditRequest) returns (AuditFinding);              // recompile-and-compare
+  rpc Seal(Empty) returns (Receipt);
+  rpc Rotate(Empty) returns (RotateInfo);                      // close the period (F6)
+  rpc Backup(BackupRequest) returns (stream BackupChunk);      // hot consistent backup (G6)
+  rpc Attest(Empty) returns (Attestation);                     // portable signed claim (G4)
+
+  // Cluster plane (G8, PLAN4): Raft-style election + quorum-acked replication.
+  // Only meaningful when KIVI_CLUSTER is set; single-node servers answer
+  // FailedPrecondition.
+  rpc Vote(VoteRequest) returns (VoteReply);                   // election ballot
+  rpc Beat(BeatRequest) returns (BeatReply);                   // leader heartbeat
+  // The follower opens the stream to the LEADER: the leader pushes records,
+  // the follower sends acks on the same stream. Acks drive the commit index.
+  rpc Replicate(stream ReplicateAck) returns (stream RecordReply);
+
+  // Federation (PLAN6): fetch a fresh attestation from a peer and FILE it in
+  // this ledger as a kivi.witness event — mutual testimony without consensus.
+  rpc Witness(WitnessRequest) returns (Receipt);
+
+  // Semantic view (PLAN7): traced similarity search. Every hit is a record
+  // number with its score and raw record; the reply names the model and the
+  // covered scope — an untraced score does not exist.
+  rpc Similar(SimilarRequest) returns (SimilarReply);
+
+  // Identity plane (PLAN8): password login → session token (Bearer). User
+  // management itself is receipted kivi.user events (admin plane / local CLI).
+  rpc Login(LoginRequest) returns (LoginReply);
+
+  // Head is the cheap orientation call: the ledger's last record number and
+  // head hash, straight from the open writer — NO cryptographic audit runs.
+  // Tail readers (recent_events, pagination) should use this, and reach for
+  // Verify only when integrity itself is the question.
+  rpc Head(Empty) returns (HeadReply);
+
+  // Paged view reads: deterministic KEYSET pagination over a compiled view's
+  // canonical (sorted) keys — no offsets, no drift. Snapshot pinning: page 1
+  // answers with the scope it folded to; pass that scope back as as_of on
+  // later pages and EVERY page describes the same moment (time travel reused
+  // as pagination glue). Record streams page differently: Replay(from) — the
+  // record number IS the cursor.
+  rpc QueryViewPage(ViewPageRequest) returns (ViewPage);
+
+  // Subscribe (G14): a TYPE-FILTERED live feed for point consumers that only
+  // care about one or two event types (a worker fed only kivi.apikey, a
+  // dashboard fed only kivi.metric) — the same live-tail mechanism as Replay,
+  // but the server drops non-matching records before they cross the wire
+  // instead of making every consumer receive and discard everything.
+  //
+  // Honesty note: filtering BY DESIGN creates gaps in the record numbering,
+  // so this stream does NOT carry Replay's gapless/chain-adjacency promise —
+  // each delivered record's OWN hash (and seal signature, for kivi.seal
+  // records) is still independently verifiable, proving "byte-exact what the
+  // ledger holds," but never "you received everything." A consumer that
+  // needs the stronger, audit-grade guarantee (replicas, backup, CDC that
+  // must prove no record was skipped) uses Replay — unfiltered — instead.
+  rpc Subscribe(SubscribeRequest) returns (stream RecordReply);
+}
+
+message SubscribeRequest {
+  int64 from = 1;            // start record number (the consumer's cursor)
+  bool follow = 2;            // keep the stream open, push new matching records
+  repeated string types = 3;  // empty = every type (no filtering, still gap-unsafe by contract)
+}
+
+message ViewPageRequest {
+  string view = 1;      // table | graph | series
+  string after_key = 2; // keyset cursor: keys strictly after this ("" = start)
+  int64 limit = 3;      // max entries (0 → 100; capped at 1000)
+  optional int64 as_of = 4; // pin to a snapshot (use page 1's scope)
+}
+
+message ViewEntry {
+  string key = 1;        // table: subject · graph: edge · series: series name
+  string value_json = 2; // canonical JSON of that entry (row / edge / points)
+}
+
+message ViewPage {
+  repeated ViewEntry entries = 1;
+  string next_key = 2; // "" = no more pages
+  int64 scope = 3;     // pass back as as_of to keep paging THIS snapshot
+  string hash = 4;     // digest of the WHOLE view state at that scope
+}
+
+message HeadReply {
+  int64 head_no = 1;    // last record number (-1 = empty ledger)
+  string head_hash = 2; // hash of that record ("" = empty ledger)
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginReply {
+  string token = 1;        // session bearer token
+  string role = 2;         // reader | writer | admin
+  int64 expires_unix = 3;
+}
+
+message SimilarRequest {
+  string query = 1;
+  int64 k = 2; // 0 → 5
+}
+
+message SimilarHit {
+  int64 no = 1;
+  float score = 2;
+  string record_json = 3; // the receipt itself, canonical
+}
+
+message SimilarReply {
+  repeated SimilarHit hits = 1;
+  int64 scope = 2;  // history covered by the index at answer time
+  string model = 3; // which ruler measured the similarity
+}
+
+message VoteRequest {
+  int64 term = 1;
+  string candidate = 2;  // candidate's cluster node name (addr)
+  int64 last_term = 3;   // term of the newest kivi.takeover record
+  int64 last_no = 4;     // head record number (-1 = empty)
+}
+
+message VoteReply {
+  int64 term = 1;
+  bool granted = 2;
+}
+
+message BeatRequest {
+  int64 term = 1;
+  string leader = 2;
+  int64 commit_no = 3;   // leader's quorum-acked head (followers may expose it)
+}
+
+message BeatReply {
+  int64 term = 1;
+}
+
+message ReplicateAck {
+  string follower = 1;   // sender's cluster node name (first message identifies)
+  int64 term = 2;
+  int64 acked_no = 3;    // highest record durably applied (fsynced) locally
+}
+
+message WitnessRequest {
+  string peer = 1;       // peer address to attest (must be on the witness list)
+}
+
+// Attestation is federation candidate C's first stone: a FRESH seal, exported
+// as a portable, self-contained, independently verifiable claim — "my ledger's
+// history up to record N has head H; here is my signature." A peer verifies it
+// offline (canonical hash + Ed25519 over seal_json) and may file it in its own
+// ledger as testimony. No merging, no trust by assertion — receipts only.
+message Attestation {
+  string pk = 1;        // signer public key (hex) — also embedded in the seal
+  int64 seal_no = 2;    // the seal record's number
+  int64 covered_no = 3; // last record covered by this attestation
+  string head_hash = 4; // the seal record's hash (the chain head)
+  string seal_json = 5; // the full seal record, canonical JSON — the proof itself
+}
+
+message BackupRequest {
+  string password = 1; // optional envelope encryption (empty = plaintext)
+  // Incremental mode (G7): stream only records AFTER the anchor. The anchor
+  // must name both the number and the hash of the last record the caller
+  // already holds — a mismatched anchor is refused (take a full backup).
+  bool incremental = 2;
+  int64 since_no = 3;
+  string since_hash = 4;
+}
+
+message BackupChunk { bytes data = 1; }
+
+message RotateInfo {
+  int64 period = 1;          // 1-based period number that was archived
+  string archive = 2;        // archive file name
+  string archive_sha256 = 3; // whole-file fingerprint bound into the rotation receipt
+  int64 first_no = 4;        // first record number of the new period
+}
+
+message Empty {}
+
+message AppendRequest {
+  string type = 1;      // event type ("kivi.*" is reserved and refused)
+  string body_json = 2; // the event body as JSON
+}
+
+message Receipt {
+  int64 no = 1;
+  int64 offset = 2;
+  string hash = 3;
+}
+
+message ReceiptList { repeated Receipt receipts = 1; }
+
+message EraseRequest {
+  int64 no = 1;
+  string reason = 2; // required: even forgetting leaves a trace
+}
+
+message GetRecordRequest {
+  int64 no = 1;
+  bool unseal = 2; // open a private body if the key still exists
+}
+
+message RecordReply { string record_json = 1; } // the full record, canonical JSON
+
+message ReplayRequest {
+  int64 from = 1;
+  bool follow = 2; // keep the stream open and push new records as they land
+}
+
+message VerifyReport {
+  bool ok = 1;
+  int64 records = 2;
+  int64 seals = 3;
+  int64 unsealed_tail = 4;
+  bool torn_tail = 5;
+  bool has_defect = 6;
+  int64 defect_no = 7;
+  string defect_reason = 8;
+}
+
+message TableRequest {
+  string subject = 1;
+  string attribute = 2;
+  // Time travel: answer as of record number as_of — "what did we know when
+  // the ledger stopped at N?". Free by design: the view is folded only up to
+  // N. Absent = the current head. (optional: record 0 is a real address.)
+  optional int64 as_of = 3;
+}
+
+message SubjectRequest {
+  string subject = 1;
+  optional int64 as_of = 2; // same time-travel contract as TableRequest.as_of
+}
+
+// TracedAnswer: value + the events that established it + the ledger scope it
+// was derived from. The server never emits one without a trace.
+message TracedAnswer {
+  string value_json = 1;
+  repeated int64 trace = 2;
+  int64 scope = 3;
+}
+
+message ViewState {
+  string state_json = 1;
+  int64 scope = 2;
+  string hash = 3; // canonical digest — same contract as the ledger
+}
+
+message SeriesRequest { string series = 1; } // empty = the whole series view
+
+message WhyRequest { repeated int64 trace = 1; }
+
+message RecordList { repeated RecordReply records = 1; }
+
+message AuditRequest { string view = 1; } // table|graph|series
+
+message AuditFinding {
+  string view = 1;
+  bool clean = 2;
+  string expected = 3;
+  string found = 4;
+  int64 receipt_no = 5; // defect receipt in the ledger; -1 = none (clean)
+}
