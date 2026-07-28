@@ -41,7 +41,9 @@ jobs:
         id: nuget
         uses: NuGet/login@v1
         with:
-          user: iwasoftcom         # nuget.org username (Package owner of the policy)
+          # the nuget.org username of the POLICY CREATOR (the account that made the
+          # Trusted Publishing policy), NOT the package owner org (iwasoftcom).
+          user: iwasoft
 
       - name: Push to NuGet
         run: >
