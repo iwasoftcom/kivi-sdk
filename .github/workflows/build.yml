@@ -1,13 +1,22 @@
-# Kivi SDK publishing — for the PUBLIC GitHub repo `iwasoft/kivi-sdk`.
+# Kivi SDK publishing — for the PUBLIC GitHub repo `iwasoftcom/kivi-sdk`.
 #
 # Place this file at `.github/workflows/build.yml` in that repo. The filename,
-# the repo owner/name, and `environment: production` below MUST match the NuGet
-# Trusted Publishing policy exactly, or the OIDC exchange is rejected.
+# the repo owner/name, and `environment: production` below MUST match each
+# registry's Trusted Publishing policy exactly, or the OIDC exchange is rejected.
 #
-# The repo must contain the SDK sources it builds — for NuGet that means
-# `clients/dotnet/Kivi.Client/` and `api/kivi.proto` (the .csproj references
-# ../../../api/kivi.proto), in the same layout as the kivi repo. Push only the
-# open (MIT) SDKs + the proto to this repo; never the proprietary server/core.
+# The repo must contain the SDK sources it builds, in the same layout as the
+# kivi repo. Push only the open (MIT) SDKs + the proto to this repo; never the
+# proprietary server/core.
+#
+# Registries & how each authenticates (all keyless via OIDC unless noted):
+#   .NET   / NuGet     — NuGet/login@v1                    (Trusted Publishing)
+#   Python / PyPI      — pypa/gh-action-pypi-publish        (Trusted Publishing)
+#   Rust   / crates.io — rust-lang/crates-io-auth-action    (Trusted Publishing)
+#                        NOTE: crates.io requires a MANUAL first publish of a new
+#                        crate, then linking this repo in the crates.io UI. The
+#                        `cargo` job below therefore only succeeds for the 2nd+
+#                        release; the very first `kivi-sdk` version is pushed once
+#                        with a token, out of band.
 name: build
 
 on:
@@ -17,7 +26,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write                # REQUIRED for NuGet Trusted Publishing (OIDC)
+  id-token: write                # REQUIRED for OIDC Trusted Publishing
 
 jobs:
   nuget:
@@ -34,9 +43,7 @@ jobs:
         run: dotnet pack clients/dotnet/Kivi.Client/Kivi.Client.csproj -c Release -o out
 
       # Trusted Publishing: exchange the workflow's OIDC token for a short-lived
-      # NuGet API key — no stored secret. Verify the action name/inputs against
-      # nuget.org's "Trusted Publishing" docs (the "Learn more" link), as the
-      # action is new and its interface may differ.
+      # NuGet API key — no stored secret.
       - name: NuGet login (OIDC)
         id: nuget
         uses: NuGet/login@v1
@@ -51,3 +58,51 @@ jobs:
           --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
+
+  pypi:
+    runs-on: ubuntu-latest
+    environment: production        # MUST match the PyPI pending-publisher form
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # pb2 stubs are committed, so no protoc is needed — a pure build.
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --outdir dist clients/python
+
+      # Trusted Publishing: PyPI verifies the workflow's OIDC identity against the
+      # pending/registered publisher — no API token. Works for the FIRST publish
+      # of a new project (pending publisher).
+      - name: Publish to PyPI (OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  cargo:
+    runs-on: ubuntu-latest
+    environment: production        # MUST match the crates.io Trusted Publishing config
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # build.rs compiles the vendored proto/kivi.proto → protoc required.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      # Trusted Publishing: fetch a 30-min crates.io token via OIDC (revoked in the
+      # post step). Requires a one-time manual first publish + repo link in the
+      # crates.io UI; see the header note.
+      - name: crates.io auth (OIDC)
+        id: crates
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish to crates.io
+        run: cargo publish --manifest-path clients/rust/kivi/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates.outputs.token }}
