@@ -164,6 +164,21 @@ class KiviStub:
                 request_serializer=kivi__pb2.SubscribeRequest.SerializeToString,
                 response_deserializer=kivi__pb2.RecordReply.FromString,
                 _registered_method=True)
+        self.GraphNeighbors = channel.unary_unary(
+                '/kivi.v1.Kivi/GraphNeighbors',
+                request_serializer=kivi__pb2.GraphNeighborsRequest.SerializeToString,
+                response_deserializer=kivi__pb2.GraphEdges.FromString,
+                _registered_method=True)
+        self.GraphReachable = channel.unary_unary(
+                '/kivi.v1.Kivi/GraphReachable',
+                request_serializer=kivi__pb2.GraphReachableRequest.SerializeToString,
+                response_deserializer=kivi__pb2.GraphReachableReply.FromString,
+                _registered_method=True)
+        self.GraphPath = channel.unary_unary(
+                '/kivi.v1.Kivi/GraphPath',
+                request_serializer=kivi__pb2.GraphPathRequest.SerializeToString,
+                response_deserializer=kivi__pb2.GraphPathReply.FromString,
+                _registered_method=True)
 
 
 class KiviServicer:
@@ -379,6 +394,27 @@ class KiviServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GraphNeighbors(self, request, context):
+        """Graph traversal over `relation` events (traced, bounded, as-of). The server
+        folds relations into an adjacency and walks it; every answer carries the
+        record numbers of the edges it crossed. Reader role.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GraphReachable(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GraphPath(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_KiviServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -511,6 +547,21 @@ def add_KiviServicer_to_server(servicer, server):
                     servicer.Subscribe,
                     request_deserializer=kivi__pb2.SubscribeRequest.FromString,
                     response_serializer=kivi__pb2.RecordReply.SerializeToString,
+            ),
+            'GraphNeighbors': grpc.unary_unary_rpc_method_handler(
+                    servicer.GraphNeighbors,
+                    request_deserializer=kivi__pb2.GraphNeighborsRequest.FromString,
+                    response_serializer=kivi__pb2.GraphEdges.SerializeToString,
+            ),
+            'GraphReachable': grpc.unary_unary_rpc_method_handler(
+                    servicer.GraphReachable,
+                    request_deserializer=kivi__pb2.GraphReachableRequest.FromString,
+                    response_serializer=kivi__pb2.GraphReachableReply.SerializeToString,
+            ),
+            'GraphPath': grpc.unary_unary_rpc_method_handler(
+                    servicer.GraphPath,
+                    request_deserializer=kivi__pb2.GraphPathRequest.FromString,
+                    response_serializer=kivi__pb2.GraphPathReply.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -1215,6 +1266,87 @@ class Kivi:
             '/kivi.v1.Kivi/Subscribe',
             kivi__pb2.SubscribeRequest.SerializeToString,
             kivi__pb2.RecordReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GraphNeighbors(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kivi.v1.Kivi/GraphNeighbors',
+            kivi__pb2.GraphNeighborsRequest.SerializeToString,
+            kivi__pb2.GraphEdges.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GraphReachable(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kivi.v1.Kivi/GraphReachable',
+            kivi__pb2.GraphReachableRequest.SerializeToString,
+            kivi__pb2.GraphReachableReply.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GraphPath(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/kivi.v1.Kivi/GraphPath',
+            kivi__pb2.GraphPathRequest.SerializeToString,
+            kivi__pb2.GraphPathReply.FromString,
             options,
             channel_credentials,
             insecure,

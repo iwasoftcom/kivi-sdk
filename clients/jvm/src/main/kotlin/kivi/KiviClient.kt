@@ -56,6 +56,25 @@ data class ViewEntry(val key: String, val valueJson: String)
 data class ViewPage(val entries: List<ViewEntry>, val nextKey: String,
                     val scope: Long, val hash: String)
 
+/** One directed, traced relation: source —relation→ target, set by record [no]. */
+data class GraphEdge(val relation: String, val target: String, val no: Long)
+
+/** A node found by a traversal, with its depth and the edge record numbers
+ * along the shortest discovering path (the proof). */
+data class GraphReached(val node: String, val depth: Long, val trace: List<Long>)
+
+/** One step of a path: from —relation→ to, via edge record [no]. */
+data class GraphHop(val from: String, val relation: String, val to: String, val no: Long)
+
+/** A graph neighbor read: the edges plus whether the scan cap was hit. */
+data class GraphEdges(val edges: List<GraphEdge>, val truncated: Boolean)
+
+/** A reachability read: reached nodes plus whether a bound was hit. */
+data class GraphReach(val nodes: List<GraphReached>, val truncated: Boolean)
+
+/** A shortest-path read: the hops, whether one was found, and truncation. */
+data class GraphPath(val hops: List<GraphHop>, val found: Boolean, val truncated: Boolean)
+
 private fun wrap(e: StatusException): KiviException = when (e.status.code) {
     Status.Code.NOT_FOUND -> NotFoundException(e.status.description ?: "not found")
     Status.Code.UNAUTHENTICATED -> UnauthenticatedException(e.status.description ?: "unauthenticated")
@@ -144,6 +163,37 @@ class KiviClient(
         val r = stub.similar(Pb.SimilarRequest.newBuilder().setQuery(query).setK(k).build())
         SimilarAnswer(r.hitsList.map { SimilarHit(it.no, it.score, it.recordJson) },
             r.scope, r.model)
+    }
+
+    /** Direct outgoing relation edges of [node]. [asOf] pins the graph to a
+     * record number (null = current). */
+    suspend fun graphNeighbors(node: String, asOf: Long? = null): GraphEdges = call {
+        val b = Pb.GraphNeighborsRequest.newBuilder().setNode(node)
+        if (asOf != null) b.asOf = asOf
+        val r = stub.graphNeighbors(b.build())
+        GraphEdges(r.edgesList.map { GraphEdge(it.relation, it.target, it.no) }, r.truncated)
+    }
+
+    /** Every node reachable from [node] within [depth] hops (0 = server default),
+     * each with its edge trace. [limit] 0 = server default. */
+    suspend fun graphReachable(node: String, depth: Long = 0, limit: Long = 0,
+                               asOf: Long? = null): GraphReach = call {
+        val b = Pb.GraphReachableRequest.newBuilder().setNode(node).setDepth(depth).setLimit(limit)
+        if (asOf != null) b.asOf = asOf
+        val r = stub.graphReachable(b.build())
+        GraphReach(r.nodesList.map { GraphReached(it.node, it.depth, it.traceList.toList()) },
+            r.truncated)
+    }
+
+    /** Shortest edge path from [from] to [to] within [depth] hops (0 = server
+     * default). found=false when none exists inside the bound. */
+    suspend fun graphPath(from: String, to: String, depth: Long = 0,
+                          asOf: Long? = null): GraphPath = call {
+        val b = Pb.GraphPathRequest.newBuilder().setFrom(from).setTo(to).setDepth(depth)
+        if (asOf != null) b.asOf = asOf
+        val r = stub.graphPath(b.build())
+        GraphPath(r.hopsList.map { GraphHop(it.from, it.relation, it.to, it.no) },
+            r.found, r.truncated)
     }
 
     suspend fun append(type: String, bodyJson: String): Receipt = call {
@@ -276,6 +326,12 @@ class KiviBlockingClient(addr: String, token: String? = null, verify: Boolean = 
     fun head(): Pair<Long, String> = runBlocking { inner.head() }
     fun similar(query: String, k: Long = 5): SimilarAnswer =
         runBlocking { inner.similar(query, k) }
+    fun graphNeighbors(node: String, asOf: Long? = null): GraphEdges =
+        runBlocking { inner.graphNeighbors(node, asOf) }
+    fun graphReachable(node: String, depth: Long = 0, limit: Long = 0, asOf: Long? = null): GraphReach =
+        runBlocking { inner.graphReachable(node, depth, limit, asOf) }
+    fun graphPath(from: String, to: String, depth: Long = 0, asOf: Long? = null): GraphPath =
+        runBlocking { inner.graphPath(from, to, depth, asOf) }
     fun viewPage(view: String, afterKey: String = "", limit: Long = 0, asOf: Long? = null): ViewPage =
         runBlocking { inner.viewPage(view, afterKey, limit, asOf) }
     fun verifyLedger(): VerifyReport = runBlocking { inner.verifyLedger() }

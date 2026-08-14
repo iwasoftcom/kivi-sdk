@@ -13,12 +13,14 @@ Async variant: `from kivi.aio import AsyncKiviClient`.
 
 from .client import (KiviClient, Receipt, TracedAnswer, ViewState, VerifyReport,
                      SimilarHit, SimilarAnswer, Session, ViewEntry, ViewPage,
+                     GraphEdge, GraphReached, GraphHop,
                      KiviError, NotFound, Unauthenticated, PreconditionFailed,
                      InvalidArgument, Unavailable, ResourceExhausted, body_as)
 from .verify import VerificationError, ChainChecker, ed25519_verify
 
 __all__ = ["KiviClient", "Receipt", "TracedAnswer", "ViewState", "VerifyReport",
            "SimilarHit", "SimilarAnswer", "Session", "ViewEntry", "ViewPage",
+           "GraphEdge", "GraphReached", "GraphHop",
            "KiviError", "NotFound", "Unauthenticated", "PreconditionFailed",
            "InvalidArgument", "Unavailable", "ResourceExhausted", "body_as",
            "VerificationError", "ChainChecker", "ed25519_verify"]

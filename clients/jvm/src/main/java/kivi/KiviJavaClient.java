@@ -301,6 +301,48 @@ public final class KiviJavaClient implements AutoCloseable {
         return new SimilarAnswer(hits, r.getScope(), r.getModel());
     }
 
+    /** Direct outgoing relation edges of {@code node}. {@code asOf} pins the
+     * graph to a record number (null = current). */
+    public GraphEdges graphNeighbors(String node, Long asOf) {
+        KiviOuterClass.GraphNeighborsRequest.Builder b =
+                KiviOuterClass.GraphNeighborsRequest.newBuilder().setNode(node);
+        if (asOf != null) b.setAsOf(asOf);
+        KiviOuterClass.GraphEdges r = call(() -> stub.graphNeighbors(b.build()));
+        List<GraphEdge> edges = new ArrayList<>(r.getEdgesCount());
+        for (KiviOuterClass.GraphEdge e : r.getEdgesList())
+            edges.add(new GraphEdge(e.getRelation(), e.getTarget(), e.getNo()));
+        return new GraphEdges(edges, r.getTruncated());
+    }
+
+    /** Every node reachable from {@code node} within {@code depth} hops
+     * (0 = server default), each with its edge trace. {@code limit} 0 = default. */
+    public GraphReach graphReachable(String node, long depth, long limit, Long asOf) {
+        KiviOuterClass.GraphReachableRequest.Builder b =
+                KiviOuterClass.GraphReachableRequest.newBuilder()
+                        .setNode(node).setDepth(depth).setLimit(limit);
+        if (asOf != null) b.setAsOf(asOf);
+        KiviOuterClass.GraphReachableReply r = call(() -> stub.graphReachable(b.build()));
+        List<GraphReached> nodes = new ArrayList<>(r.getNodesCount());
+        for (KiviOuterClass.GraphReached n : r.getNodesList())
+            nodes.add(new GraphReached(n.getNode(), n.getDepth(),
+                    new ArrayList<>(n.getTraceList())));
+        return new GraphReach(nodes, r.getTruncated());
+    }
+
+    /** Shortest edge path from {@code from} to {@code to} within {@code depth}
+     * hops (0 = server default). found=false when none exists inside the bound. */
+    public GraphPath graphPath(String from, String to, long depth, Long asOf) {
+        KiviOuterClass.GraphPathRequest.Builder b =
+                KiviOuterClass.GraphPathRequest.newBuilder()
+                        .setFrom(from).setTo(to).setDepth(depth);
+        if (asOf != null) b.setAsOf(asOf);
+        KiviOuterClass.GraphPathReply r = call(() -> stub.graphPath(b.build()));
+        List<GraphHop> hops = new ArrayList<>(r.getHopsCount());
+        for (KiviOuterClass.GraphHop h : r.getHopsList())
+            hops.add(new GraphHop(h.getFrom(), h.getRelation(), h.getTo(), h.getNo()));
+        return new GraphPath(hops, r.getFound(), r.getTruncated());
+    }
+
     // ---- streams: verified replay (the untrusting client) ---------------------
 
     /** Verified replay with the client's default verification setting. */

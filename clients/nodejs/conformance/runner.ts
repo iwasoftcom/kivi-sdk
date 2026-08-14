@@ -328,6 +328,44 @@ async function main(): Promise<void> {
     assert(bodyAs<Widget>(rec).weight_g === BIG, "bodyAs int64 lost");
   });
 
+  await step(
+    "S21 graph traversal (traced neighbors / reachable / shortest path)",
+    async () => {
+      // directed chain gN1 —owns→ gN2 —owns→ gN3 out of `relation` events
+      const e1 = await c.append("relation", { source: "gN1", relation: "owns", target: "gN2" });
+      const e2 = await c.append("relation", { source: "gN2", relation: "owns", target: "gN3" });
+      // neighbors: gN1 has exactly one outgoing edge, to gN2, set by e1
+      const { edges } = await c.graphNeighbors("gN1");
+      assert(
+        edges.length === 1 && edges[0].target === "gN2" &&
+          edges[0].relation === "owns" && edges[0].no === e1.no,
+        `neighbors(gN1): ${diag(edges)}`,
+      );
+      // reachable: gN3 at depth 2 with traced edge path [e1, e2]
+      const { nodes } = await c.graphReachable("gN1", 3);
+      const gn3 = nodes.find((n) => n.node === "gN3");
+      assert(
+        gn3 !== undefined && gn3.depth === 2 &&
+          gn3.trace.length === 2 && gn3.trace[0] === e1.no && gn3.trace[1] === e2.no,
+        `reachable(gN1): ${diag(gn3)}`,
+      );
+      // shortest path: two hops, each naming its edge record number
+      const { hops, found } = await c.graphPath("gN1", "gN3");
+      assert(
+        found && hops.length === 2 &&
+          hops[0].from === "gN1" && hops[0].to === "gN2" && hops[0].no === e1.no &&
+          hops[1].from === "gN2" && hops[1].to === "gN3" && hops[1].no === e2.no,
+        `path(gN1→gN3): found=${found} ${diag(hops)}`,
+      );
+      // as-of e1: gN2→gN3 did not exist yet, so gN3 is unreachable
+      const early = await c.graphReachable("gN1", 3, 0, e1.no);
+      assert(
+        early.nodes.every((n) => n.node !== "gN3"),
+        `as-of ${e1.no} reached gN3 before its edge existed`,
+      );
+    },
+  );
+
   const verdict = pass === total ? "PASS" : "FAIL";
   console.log(`CONFORMANCE ${verdict} ${pass}/${total}`);
   c.close();

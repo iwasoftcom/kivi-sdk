@@ -58,6 +58,17 @@ public readonly record struct PagedEntry(string Key, string ValueJson);
 public readonly record struct PagedView(IReadOnlyList<PagedEntry> Entries,
     string NextKey, long Scope, string Hash);
 
+/// <summary>One directed, traced relation: Source —Relation→ Target, set by
+/// record No.</summary>
+public readonly record struct GraphEdge(string Relation, string Target, long No);
+
+/// <summary>A node found by a traversal, with its depth and the edge record
+/// numbers along the shortest discovering path (the proof).</summary>
+public readonly record struct GraphReached(string Node, long Depth, IReadOnlyList<long> Trace);
+
+/// <summary>One step of a path: From —Relation→ To, via edge record No.</summary>
+public readonly record struct GraphHop(string From, string Relation, string To, long No);
+
 public sealed class KiviClient : IDisposable
 {
     private readonly GrpcChannel _channel;
@@ -229,6 +240,44 @@ public sealed class KiviClient : IDisposable
         return new PagedView(
             r.Entries.Select(e => new PagedEntry(e.Key, e.ValueJson)).ToList(),
             r.NextKey, r.Scope, r.Hash);
+    });
+
+    /// <summary>Direct outgoing relation edges of <paramref name="node"/>. asOf
+    /// pins the graph to a record number (null = current).</summary>
+    public Task<(IReadOnlyList<GraphEdge> Edges, bool Truncated)> GraphNeighborsAsync(
+        string node, long? asOf = null) => Call(async () =>
+    {
+        var req = new GraphNeighborsRequest { Node = node };
+        if (asOf is long n) req.AsOf = n;
+        var r = await _stub.GraphNeighborsAsync(req, _md);
+        return ((IReadOnlyList<GraphEdge>)r.Edges
+            .Select(e => new GraphEdge(e.Relation, e.Target, e.No)).ToList(), r.Truncated);
+    });
+
+    /// <summary>Every node reachable from <paramref name="node"/> within
+    /// <paramref name="depth"/> hops (0 = server default), each with its edge
+    /// trace. limit 0 = server default.</summary>
+    public Task<(IReadOnlyList<GraphReached> Nodes, bool Truncated)> GraphReachableAsync(
+        string node, long depth = 0, long limit = 0, long? asOf = null) => Call(async () =>
+    {
+        var req = new GraphReachableRequest { Node = node, Depth = depth, Limit = limit };
+        if (asOf is long n) req.AsOf = n;
+        var r = await _stub.GraphReachableAsync(req, _md);
+        return ((IReadOnlyList<GraphReached>)r.Nodes
+            .Select(x => new GraphReached(x.Node, x.Depth, x.Trace.ToList())).ToList(), r.Truncated);
+    });
+
+    /// <summary>Shortest edge path from <paramref name="from"/> to
+    /// <paramref name="to"/> within <paramref name="depth"/> hops (0 = server
+    /// default). Found=false when none exists inside the bound.</summary>
+    public Task<(IReadOnlyList<GraphHop> Hops, bool Found, bool Truncated)> GraphPathAsync(
+        string from, string to, long depth = 0, long? asOf = null) => Call(async () =>
+    {
+        var req = new GraphPathRequest { From = from, To = to, Depth = depth };
+        if (asOf is long n) req.AsOf = n;
+        var r = await _stub.GraphPathAsync(req, _md);
+        return ((IReadOnlyList<GraphHop>)r.Hops
+            .Select(h => new GraphHop(h.From, h.Relation, h.To, h.No)).ToList(), r.Found, r.Truncated);
     });
 
     /// <summary>Traced semantic search: every hit is a record number + score

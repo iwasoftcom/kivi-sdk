@@ -248,6 +248,34 @@ Step("S20 typed entity round-trip (entity in, entity out)", () =>
         throw new Exception($"nested: {outw.Size}");
 });
 
+Step("S21 graph traversal (traced neighbors / reachable / shortest path)", () =>
+{
+    // directed chain gN1 —owns→ gN2 —owns→ gN3 out of `relation` events
+    var e1 = c.Append("relation", """{"source":"gN1","relation":"owns","target":"gN2"}""");
+    var e2 = c.Append("relation", """{"source":"gN2","relation":"owns","target":"gN3"}""");
+    // neighbors: gN1 has exactly one outgoing edge, to gN2, set by e1
+    var (edges, _) = c.GraphNeighborsAsync("gN1").GetAwaiter().GetResult();
+    if (edges.Count != 1 || edges[0].Target != "gN2" || edges[0].Relation != "owns"
+        || edges[0].No != e1.No)
+        throw new Exception($"neighbors(gN1): {edges.Count} edges");
+    // reachable: gN3 at depth 2 with traced edge path [e1, e2]
+    var (nodes, _) = c.GraphReachableAsync("gN1", 3).GetAwaiter().GetResult();
+    var gn3 = nodes.FirstOrDefault(n => n.Node == "gN3");
+    if (gn3.Node != "gN3" || gn3.Depth != 2
+        || gn3.Trace.Count != 2 || gn3.Trace[0] != e1.No || gn3.Trace[1] != e2.No)
+        throw new Exception($"reachable(gN1): gN3 depth={gn3.Depth}");
+    // shortest path: two hops, each naming its edge record number
+    var (hops, found, _) = c.GraphPathAsync("gN1", "gN3").GetAwaiter().GetResult();
+    if (!found || hops.Count != 2
+        || hops[0].From != "gN1" || hops[0].To != "gN2" || hops[0].No != e1.No
+        || hops[1].From != "gN2" || hops[1].To != "gN3" || hops[1].No != e2.No)
+        throw new Exception($"path(gN1→gN3): found={found} hops={hops.Count}");
+    // as-of e1: gN2→gN3 did not exist yet, so gN3 is unreachable
+    var (early, _) = c.GraphReachableAsync("gN1", 3, 0, e1.No).GetAwaiter().GetResult();
+    if (early.Any(n => n.Node == "gN3"))
+        throw new Exception($"as-of {e1.No} reached gN3 before its edge existed");
+});
+
 var verdict = pass == total ? "PASS" : "FAIL";
 Console.WriteLine($"CONFORMANCE {verdict} {pass}/{total}");
 return pass == total ? 0 : 1;

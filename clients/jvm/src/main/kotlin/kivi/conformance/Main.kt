@@ -274,6 +274,34 @@ fun main(args: Array<String>) {
         check(out.size == Size(3, 4)) { "nested: ${out.size}" }
     }
 
+    step("S21 graph traversal (traced neighbors / reachable / shortest path)") {
+        runBlocking {
+            // directed chain gN1 —owns→ gN2 —owns→ gN3 out of `relation` events
+            val e1 = c.append("relation", """{"source":"gN1","relation":"owns","target":"gN2"}""")
+            val e2 = c.append("relation", """{"source":"gN2","relation":"owns","target":"gN3"}""")
+            // neighbors: gN1 has exactly one outgoing edge, to gN2, set by e1
+            val n = c.graphNeighbors("gN1")
+            check(n.edges.size == 1 && n.edges[0].target == "gN2" &&
+                n.edges[0].relation == "owns" && n.edges[0].no == e1.no) { "neighbors(gN1): ${n.edges}" }
+            // reachable: gN3 at depth 2 with traced edge path [e1, e2]
+            val reached = c.graphReachable("gN1", depth = 3)
+            val gn3 = reached.nodes.find { it.node == "gN3" }
+            check(gn3 != null && gn3.depth == 2L && gn3.trace == listOf(e1.no, e2.no)) {
+                "reachable(gN1): gN3=$gn3"
+            }
+            // shortest path: two hops, each naming its edge record number
+            val p = c.graphPath("gN1", "gN3")
+            check(p.found && p.hops.size == 2 &&
+                p.hops[0].from == "gN1" && p.hops[0].to == "gN2" && p.hops[0].no == e1.no &&
+                p.hops[1].from == "gN2" && p.hops[1].to == "gN3" && p.hops[1].no == e2.no) {
+                "path(gN1→gN3): found=${p.found} hops=${p.hops}"
+            }
+            // as-of e1: gN2→gN3 did not exist yet, so gN3 is unreachable
+            val early = c.graphReachable("gN1", depth = 3, asOf = e1.no)
+            check(early.nodes.none { it.node == "gN3" }) { "as-of ${e1.no} reached gN3 too early" }
+        }
+    }
+
     step("S15 Java SDK parity (pure Java client)") {
         // the scenario body lives in JavaScenario.java — Java source is the proof
         JavaScenario.run(cleanAddr, token, authAddr)

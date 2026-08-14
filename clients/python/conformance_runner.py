@@ -256,6 +256,30 @@ def s20(c):
     assert body_as(_Widget, rec).weight_g == BIG
 
 
+@step("S21 graph traversal (traced neighbors / reachable / shortest path)")
+def s21(c):
+    # directed chain gN1 —owns→ gN2 —owns→ gN3 out of `relation` events
+    e1 = c.append("relation", {"source": "gN1", "relation": "owns", "target": "gN2"})
+    e2 = c.append("relation", {"source": "gN2", "relation": "owns", "target": "gN3"})
+    # neighbors: gN1 has exactly one outgoing edge, to gN2, set by e1
+    edges, _ = c.graph_neighbors("gN1")
+    assert len(edges) == 1 and edges[0].target == "gN2" \
+        and edges[0].relation == "owns" and edges[0].no == e1.no, edges
+    # reachable: gN3 at depth 2 with traced edge path [e1, e2]
+    reached, _ = c.graph_reachable("gN1", depth=3)
+    gn3 = next((n for n in reached if n.node == "gN3"), None)
+    assert gn3 is not None and gn3.depth == 2 \
+        and list(gn3.trace) == [e1.no, e2.no], reached
+    # shortest path: two hops, each naming its edge record number
+    hops, found, _ = c.graph_path("gN1", "gN3")
+    assert found and len(hops) == 2, (found, hops)
+    assert hops[0].frm == "gN1" and hops[0].to == "gN2" and hops[0].no == e1.no
+    assert hops[1].frm == "gN2" and hops[1].to == "gN3" and hops[1].no == e2.no
+    # as-of e1: gN2→gN3 did not exist yet, so gN3 is unreachable
+    early, _ = c.graph_reachable("gN1", depth=3, as_of=e1.no)
+    assert all(n.node != "gN3" for n in early), early
+
+
 def main():
     if len(sys.argv) != 6:
         print(__doc__)
@@ -280,6 +304,7 @@ def main():
     s17(c)
     s18(c)
     s20(c)
+    s21(c)
     print(f"CONFORMANCE {'PASS' if PASS == TOTAL else 'FAIL'} {PASS}/{TOTAL}")
     return 0 if PASS == TOTAL else 1
 

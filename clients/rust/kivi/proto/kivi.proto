@@ -94,6 +94,65 @@ service Kivi {
   // needs the stronger, audit-grade guarantee (replicas, backup, CDC that
   // must prove no record was skipped) uses Replay — unfiltered — instead.
   rpc Subscribe(SubscribeRequest) returns (stream RecordReply);
+  // Graph traversal over `relation` events (traced, bounded, as-of). The server
+  // folds relations into an adjacency and walks it; every answer carries the
+  // record numbers of the edges it crossed. Reader role.
+  rpc GraphNeighbors(GraphNeighborsRequest) returns (GraphEdges);
+  rpc GraphReachable(GraphReachableRequest) returns (GraphReachableReply);
+  rpc GraphPath(GraphPathRequest) returns (GraphPathReply);
+}
+
+// A directed, traced relation edge: source —relation→ target, set by record no.
+message GraphEdge {
+  string relation = 1;
+  string target = 2;
+  int64 no = 3;
+}
+
+message GraphNeighborsRequest {
+  string node = 1;
+  optional int64 as_of = 2; // pin to the graph as of a record number
+}
+message GraphEdges {
+  repeated GraphEdge edges = 1;
+  bool truncated = 2; // the relation scan hit its cap — a partial graph
+}
+
+message GraphReachableRequest {
+  string node = 1;
+  int64 depth = 2;          // max hops (0 → 3)
+  int64 limit = 3;          // max nodes returned (0 → default)
+  optional int64 as_of = 4;
+}
+// One node reached by a traversal, with the edge record numbers along the
+// shortest discovering path (its proof).
+message GraphReached {
+  string node = 1;
+  int64 depth = 2;
+  repeated int64 trace = 3;
+}
+message GraphReachableReply {
+  repeated GraphReached nodes = 1;
+  bool truncated = 2;
+}
+
+message GraphPathRequest {
+  string from = 1;
+  string to = 2;
+  int64 depth = 3;          // max hops (0 → 6)
+  optional int64 as_of = 4;
+}
+// One step of a path: from —relation→ to, via edge record no.
+message GraphHop {
+  string from = 1;
+  string relation = 2;
+  string to = 3;
+  int64 no = 4;
+}
+message GraphPathReply {
+  repeated GraphHop hops = 1;
+  bool found = 2;
+  bool truncated = 3;
 }
 
 message SubscribeRequest {
@@ -223,6 +282,11 @@ message Empty {}
 message AppendRequest {
   string type = 1;      // event type ("kivi.*" is reserved and refused)
   string body_json = 2; // the event body as JSON
+  string purpose = 3;   // v3: legal basis for processing (KVKK/GDPR); validated
+                        // against the purpose registry. actor is NOT here — the
+                        // server stamps it from the authenticated identity.
+  int64 schema = 4;     // v3: body-shape version for this type (0 = unversioned);
+                        // views upcast old schemas to the current shape on read.
 }
 
 message Receipt {

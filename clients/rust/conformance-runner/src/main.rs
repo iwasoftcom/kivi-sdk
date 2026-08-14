@@ -476,6 +476,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await;
 
+    step(
+        &mut pass,
+        &mut total,
+        "S21 graph traversal (traced neighbors / reachable / shortest path)",
+        || async {
+            // directed chain gN1 —owns→ gN2 —owns→ gN3 out of `relation` events
+            let e1 = c
+                .append("relation", &json!({"source":"gN1","relation":"owns","target":"gN2"}))
+                .await?;
+            let e2 = c
+                .append("relation", &json!({"source":"gN2","relation":"owns","target":"gN3"}))
+                .await?;
+            // neighbors: gN1 has exactly one outgoing edge, to gN2, set by e1
+            let (edges, _) = c.graph_neighbors("gN1", None).await?;
+            if edges.len() != 1 || edges[0].target != "gN2" || edges[0].relation != "owns"
+                || edges[0].no != e1.no
+            {
+                return Err(format!("neighbors(gN1): {edges:?} (want owns→gN2 @{})", e1.no).into());
+            }
+            // reachable: gN3 at depth 2 with traced edge path [e1, e2]
+            let (reached, _) = c.graph_reachable("gN1", 3, 0, None).await?;
+            let gn3 = reached.iter().find(|n| n.node == "gN3");
+            match gn3 {
+                Some(n) if n.depth == 2 && n.trace == vec![e1.no, e2.no] => {}
+                other => {
+                    return Err(format!("reachable(gN1): gN3={other:?} (want depth 2, trace [{} {}])",
+                        e1.no, e2.no).into())
+                }
+            }
+            // shortest path: two hops, each naming its edge record number
+            let (hops, found, _) = c.graph_path("gN1", "gN3", 0, None).await?;
+            if !found || hops.len() != 2
+                || hops[0].from != "gN1" || hops[0].to != "gN2" || hops[0].no != e1.no
+                || hops[1].from != "gN2" || hops[1].to != "gN3" || hops[1].no != e2.no
+            {
+                return Err(format!("path(gN1→gN3): found={found} hops={hops:?}").into());
+            }
+            // as-of e1: gN2→gN3 did not exist yet, so gN3 is unreachable
+            let (early, _) = c.graph_reachable("gN1", 3, 0, Some(e1.no)).await?;
+            if early.iter().any(|n| n.node == "gN3") {
+                return Err(format!("as-of {} reached gN3 before its edge existed", e1.no).into());
+            }
+            Ok(())
+        },
+    )
+    .await;
+
     let verdict = if pass == total { "PASS" } else { "FAIL" };
     println!("CONFORMANCE {verdict} {pass}/{total}");
     if pass != total {

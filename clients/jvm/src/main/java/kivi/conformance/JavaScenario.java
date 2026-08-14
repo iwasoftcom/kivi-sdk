@@ -92,6 +92,35 @@ public final class JavaScenario {
             check("cog".equals(outW.name()) && outW.weightG() == 9007199254740993L
                             && outW.size().w() == 3 && outW.size().h() == 4,
                     "java typed round-trip: " + outW.name() + "/" + outW.weightG());
+
+            // graph traversal, pure Java: directed chain jgN1 —owns→ jgN2 —owns→ jgN3
+            Receipt ge1 = c.append("relation",
+                    "{\"source\":\"jgN1\",\"relation\":\"owns\",\"target\":\"jgN2\"}");
+            Receipt ge2 = c.append("relation",
+                    "{\"source\":\"jgN2\",\"relation\":\"owns\",\"target\":\"jgN3\"}");
+            kivi.GraphEdges gn = c.graphNeighbors("jgN1", null);
+            check(gn.getEdges().size() == 1
+                            && "jgN2".equals(gn.getEdges().get(0).getTarget())
+                            && "owns".equals(gn.getEdges().get(0).getRelation())
+                            && gn.getEdges().get(0).getNo() == ge1.getNo(),
+                    "java neighbors(jgN1): " + gn.getEdges());
+            kivi.GraphReach gr = c.graphReachable("jgN1", 3, 0, null);
+            kivi.GraphReached gr3 = null;
+            for (kivi.GraphReached rn : gr.getNodes())
+                if ("jgN3".equals(rn.getNode())) gr3 = rn;
+            check(gr3 != null && gr3.getDepth() == 2
+                            && gr3.getTrace().equals(java.util.List.of(ge1.getNo(), ge2.getNo())),
+                    "java reachable(jgN1): jgN3=" + gr3);
+            kivi.GraphPath gp = c.graphPath("jgN1", "jgN3", 0, null);
+            check(gp.getFound() && gp.getHops().size() == 2
+                            && "jgN1".equals(gp.getHops().get(0).getFrom())
+                            && "jgN3".equals(gp.getHops().get(1).getTo())
+                            && gp.getHops().get(0).getNo() == ge1.getNo()
+                            && gp.getHops().get(1).getNo() == ge2.getNo(),
+                    "java path(jgN1→jgN3): found=" + gp.getFound() + " hops=" + gp.getHops());
+            kivi.GraphReach early = c.graphReachable("jgN1", 3, 0, ge1.getNo());
+            for (kivi.GraphReached en : early.getNodes())
+                check(!"jgN3".equals(en.getNode()), "java as-of reached jgN3 too early");
         }
 
         // ---- identity + write + semantic, against the auth server -------------

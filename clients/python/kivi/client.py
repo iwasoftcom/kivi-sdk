@@ -198,6 +198,32 @@ class ViewPage:
     hash: str
 
 
+@dataclass(frozen=True)
+class GraphEdge:
+    """One directed, traced relation: source —relation→ target, set by record `no`."""
+    relation: str
+    target: str
+    no: int
+
+
+@dataclass(frozen=True)
+class GraphReached:
+    """A node found by a traversal, with its depth and the edge record numbers
+    along the shortest discovering path (the proof)."""
+    node: str
+    depth: int
+    trace: tuple
+
+
+@dataclass(frozen=True)
+class GraphHop:
+    """One step of a path: from —relation→ to, via edge record `no`."""
+    frm: str
+    relation: str
+    to: str
+    no: int
+
+
 class KiviClient:
     """Synchronous kivi client. `verify=True` (default) turns on client-side
     stream verification; pass verify=False only when you consciously trust the
@@ -339,6 +365,38 @@ class KiviClient:
     def graph(self) -> ViewState:
         r = self._call(self._stub.QueryGraph, pb.Empty())
         return ViewState(json.loads(r.state_json), r.scope, r.hash)
+
+    def graph_neighbors(self, node: str, as_of: int = None):
+        """Direct outgoing relation edges of `node`. as_of pins the graph to a
+        record number (None = current). Returns (edges, truncated)."""
+        req = pb.GraphNeighborsRequest(node=node)
+        if as_of is not None:
+            req.as_of = as_of
+        r = self._call(self._stub.GraphNeighbors, req)
+        edges = tuple(GraphEdge(e.relation, e.target, e.no) for e in r.edges)
+        return edges, r.truncated
+
+    def graph_reachable(self, node: str, depth: int = 0, limit: int = 0,
+                        as_of: int = None):
+        """Every node reachable from `node` within `depth` hops (0 = server
+        default), each with its edge trace. Returns (nodes, truncated)."""
+        req = pb.GraphReachableRequest(node=node, depth=depth, limit=limit)
+        if as_of is not None:
+            req.as_of = as_of
+        r = self._call(self._stub.GraphReachable, req)
+        nodes = tuple(GraphReached(n.node, n.depth, tuple(n.trace)) for n in r.nodes)
+        return nodes, r.truncated
+
+    def graph_path(self, frm: str, to: str, depth: int = 0, as_of: int = None):
+        """Shortest edge path from `frm` to `to` within `depth` hops (0 = server
+        default). Returns (hops, found, truncated)."""
+        req = pb.GraphPathRequest(**{"from": frm, "to": to, "depth": depth})
+        if as_of is not None:
+            req.as_of = as_of
+        r = self._call(self._stub.GraphPath, req)
+        hops = tuple(GraphHop(h.__getattribute__("from"), h.relation, h.to, h.no)
+                     for h in r.hops)
+        return hops, r.found, r.truncated
 
     def series(self, series: str = "") -> ViewState:
         r = self._call(self._stub.QuerySeries, pb.SeriesRequest(series=series))

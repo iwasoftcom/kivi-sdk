@@ -202,6 +202,29 @@ export interface ViewPage {
   hash: string;
 }
 
+/** One directed, traced relation: source —relation→ target, set by record `no`. */
+export interface GraphEdge {
+  relation: string;
+  target: string;
+  no: number;
+}
+
+/** A node found by a traversal, with its depth and the edge record numbers
+ * along the shortest discovering path (the proof). */
+export interface GraphReached {
+  node: string;
+  depth: number;
+  trace: number[];
+}
+
+/** One step of a path: from —relation→ to, via edge record `no`. */
+export interface GraphHop {
+  from: string;
+  relation: string;
+  to: string;
+  no: number;
+}
+
 export interface ClientOptions {
   token?: string;
   /** Client-side stream verification; default true (the untrusting client). */
@@ -405,6 +428,62 @@ export class KiviClient {
       this.meta(),
     );
     return { stateJson: r.stateJson, scope: Number(r.scope), hash: r.hash };
+  }
+
+  /** Direct outgoing relation edges of `node`. asOf pins the graph to a record
+   * number (undefined = current). */
+  async graphNeighbors(
+    node: string,
+    asOf?: number,
+  ): Promise<{ edges: GraphEdge[]; truncated: boolean }> {
+    const req: any = { node };
+    if (asOf !== undefined) req.asOf = asOf;
+    const r = await call<any, any>(this.grpcClient, "graphNeighbors", req, this.meta());
+    const edges: GraphEdge[] = (r.edges ?? []).map((e: any) => ({
+      relation: e.relation,
+      target: e.target,
+      no: Number(e.no),
+    }));
+    return { edges, truncated: !!r.truncated };
+  }
+
+  /** Every node reachable from `node` within `depth` hops (0 = server default),
+   * each with its edge trace. limit 0 = server default. */
+  async graphReachable(
+    node: string,
+    depth = 0,
+    limit = 0,
+    asOf?: number,
+  ): Promise<{ nodes: GraphReached[]; truncated: boolean }> {
+    const req: any = { node, depth, limit };
+    if (asOf !== undefined) req.asOf = asOf;
+    const r = await call<any, any>(this.grpcClient, "graphReachable", req, this.meta());
+    const nodes: GraphReached[] = (r.nodes ?? []).map((n: any) => ({
+      node: n.node,
+      depth: Number(n.depth),
+      trace: (n.trace ?? []).map((x: any) => Number(x)),
+    }));
+    return { nodes, truncated: !!r.truncated };
+  }
+
+  /** Shortest edge path from `from` to `to` within `depth` hops (0 = server
+   * default). found=false when none exists inside the bound. */
+  async graphPath(
+    from: string,
+    to: string,
+    depth = 0,
+    asOf?: number,
+  ): Promise<{ hops: GraphHop[]; found: boolean; truncated: boolean }> {
+    const req: any = { from, to, depth };
+    if (asOf !== undefined) req.asOf = asOf;
+    const r = await call<any, any>(this.grpcClient, "graphPath", req, this.meta());
+    const hops: GraphHop[] = (r.hops ?? []).map((h: any) => ({
+      from: h.from,
+      relation: h.relation,
+      to: h.to,
+      no: Number(h.no),
+    }));
+    return { hops, found: !!r.found, truncated: !!r.truncated };
   }
 
   /** Keyset pagination over a compiled view (table|graph|series). Pass

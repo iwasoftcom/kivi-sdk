@@ -184,6 +184,32 @@ pub struct ViewEntry {
     pub value: Value,
 }
 
+/// One directed, traced relation edge: source —relation→ target, set by record `no`.
+#[derive(Debug, Clone)]
+pub struct GraphEdge {
+    pub relation: String,
+    pub target: String,
+    pub no: i64,
+}
+
+/// A node found by a traversal, with its depth and the edge record numbers
+/// along the shortest discovering path (the proof).
+#[derive(Debug, Clone)]
+pub struct GraphReached {
+    pub node: String,
+    pub depth: i64,
+    pub trace: Vec<i64>,
+}
+
+/// One step of a path: `from` —relation→ `to`, via edge record `no`.
+#[derive(Debug, Clone)]
+pub struct GraphHop {
+    pub from: String,
+    pub relation: String,
+    pub to: String,
+    pub no: i64,
+}
+
 /// One page of a keyset walk over a compiled view. `next_key` empty = done.
 /// `scope`/`hash` stamp the SNAPSHOT: pass `scope` back as `as_of` and every
 /// later page keeps describing that same moment.
@@ -317,6 +343,7 @@ impl Client {
             .append(pb::AppendRequest {
                 r#type: event_type.into(),
                 body_json: body.to_string(),
+                ..Default::default()
             })
             .await?
             .into_inner();
@@ -350,6 +377,7 @@ impl Client {
             .append_private(pb::AppendRequest {
                 r#type: event_type.into(),
                 body_json: body.to_string(),
+                ..Default::default()
             })
             .await?
             .into_inner();
@@ -521,6 +549,97 @@ impl Client {
             scope: r.scope,
             hash: r.hash,
         })
+    }
+
+    /// Direct outgoing relation edges of `node`. `as_of` pins the graph to a
+    /// record number (`None` = current). Returns `(edges, truncated)`.
+    pub async fn graph_neighbors(
+        &self,
+        node: &str,
+        as_of: Option<i64>,
+    ) -> Result<(Vec<GraphEdge>, bool), KiviError> {
+        let r = self
+            .stub()
+            .graph_neighbors(pb::GraphNeighborsRequest {
+                node: node.into(),
+                as_of,
+            })
+            .await?
+            .into_inner();
+        let edges = r
+            .edges
+            .into_iter()
+            .map(|e| GraphEdge {
+                relation: e.relation,
+                target: e.target,
+                no: e.no,
+            })
+            .collect();
+        Ok((edges, r.truncated))
+    }
+
+    /// Every node reachable from `node` within `depth` hops (0 = server default),
+    /// each with its edge trace. `limit` 0 = server default. Returns
+    /// `(nodes, truncated)`.
+    pub async fn graph_reachable(
+        &self,
+        node: &str,
+        depth: i64,
+        limit: i64,
+        as_of: Option<i64>,
+    ) -> Result<(Vec<GraphReached>, bool), KiviError> {
+        let r = self
+            .stub()
+            .graph_reachable(pb::GraphReachableRequest {
+                node: node.into(),
+                depth,
+                limit,
+                as_of,
+            })
+            .await?
+            .into_inner();
+        let nodes = r
+            .nodes
+            .into_iter()
+            .map(|n| GraphReached {
+                node: n.node,
+                depth: n.depth,
+                trace: n.trace,
+            })
+            .collect();
+        Ok((nodes, r.truncated))
+    }
+
+    /// Shortest edge path from `from` to `to` within `depth` hops (0 = server
+    /// default). Returns `(hops, found, truncated)`.
+    pub async fn graph_path(
+        &self,
+        from: &str,
+        to: &str,
+        depth: i64,
+        as_of: Option<i64>,
+    ) -> Result<(Vec<GraphHop>, bool, bool), KiviError> {
+        let r = self
+            .stub()
+            .graph_path(pb::GraphPathRequest {
+                from: from.into(),
+                to: to.into(),
+                depth,
+                as_of,
+            })
+            .await?
+            .into_inner();
+        let hops = r
+            .hops
+            .into_iter()
+            .map(|h| GraphHop {
+                from: h.from,
+                relation: h.relation,
+                to: h.to,
+                no: h.no,
+            })
+            .collect();
+        Ok((hops, r.found, r.truncated))
     }
 
     pub async fn series(&self, series: &str) -> Result<ViewState, KiviError> {

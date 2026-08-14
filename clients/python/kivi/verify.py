@@ -9,8 +9,16 @@ runtime dependency stays grpcio alone.
 import hashlib
 import json
 
-CORE_KEYS = ("no", "time", "type", "body", "prev_hash")
+CORE_KEYS_V2 = ("no", "time", "type", "body", "prev_hash")
+CORE_KEYS_V3 = ("actor", "body", "hlc", "no", "prev_hash", "purpose", "schema",
+                "time", "type")
 SEAL_TYPE = "kivi.seal"
+
+
+def _core_keys(rec: dict) -> tuple:
+    """A record is v3 iff it carries the top-level "hlc" field (structural, per
+    FORMAT.md); canonical() sorts keys so the order listed here is irrelevant."""
+    return CORE_KEYS_V3 if "hlc" in rec else CORE_KEYS_V2
 
 
 class VerificationError(Exception):
@@ -23,7 +31,8 @@ def canonical(core: dict) -> bytes:
 
 
 def record_hash(rec: dict) -> str:
-    return hashlib.sha256(canonical({k: rec[k] for k in CORE_KEYS})).hexdigest()
+    return hashlib.sha256(
+        canonical({k: rec[k] for k in _core_keys(rec)})).hexdigest()
 
 
 def check_record_integrity(rec: dict, check_seals: bool = True) -> None:
@@ -41,7 +50,7 @@ def check_record_integrity(rec: dict, check_seals: bool = True) -> None:
             sig = bytes.fromhex(rec["sig"])
         except (KeyError, TypeError, ValueError):
             raise VerificationError(f"seal {no}: malformed key or signature")
-        if not ed25519_verify(sig, canonical({k: rec[k] for k in CORE_KEYS}), pk):
+        if not ed25519_verify(sig, canonical({k: rec[k] for k in _core_keys(rec)}), pk):
             raise VerificationError(f"seal {no}: Ed25519 signature invalid")
 
 
@@ -65,6 +74,30 @@ class ChainChecker:
         self._prev_hash = rec.get("hash")
         self._next_no = (no + 1) if isinstance(no, int) else None
         return rec
+
+
+def verify_ledger_file(path):
+    """Verify a ledger FILE **offline** — no server, no proprietary core, only
+    this self-contained module (v2.M11). Returns (ok, defect) where defect is
+    None or {"no", "reason"}. An auditor with a ledger copy and this one file can
+    prove integrity end to end, even though the kivi server/core is closed."""
+    checker = ChainChecker()
+    try:
+        with open(path, "rb") as f:
+            i = 0
+            for raw in f:
+                if not raw.endswith(b"\n"):
+                    break  # torn tail — not verified (reported by its absence)
+                try:
+                    rec = json.loads(raw)
+                    checker.check(rec)
+                except (ValueError, VerificationError) as e:
+                    no = rec.get("no", i) if isinstance(locals().get("rec"), dict) else i
+                    return False, {"no": no, "reason": str(e)}
+                i += 1
+    except FileNotFoundError:
+        return True, None
+    return True, None
 
 
 class RecordIntegrityChecker:
@@ -170,3 +203,16 @@ def ed25519_verify(sig: bytes, msg: bytes, pk: bytes) -> bool:
     sb = _scalarmult(_B, s)
     rka = _edwards_add(_decompress(r_enc), _scalarmult(a, k))
     return _compress(sb) == _compress(rka)
+
+
+if __name__ == "__main__":  # standalone verifier: python -m kivi.verify <ledger>
+    import sys
+    if len(sys.argv) != 2:
+        print("usage: python -m kivi.verify <ledger-file>", file=sys.stderr)
+        sys.exit(2)
+    ok, defect = verify_ledger_file(sys.argv[1])
+    if ok:
+        print("VERIFY OK")
+        sys.exit(0)
+    print(f"VERIFY DEFECT at record {defect['no']}: {defect['reason']}")
+    sys.exit(1)
